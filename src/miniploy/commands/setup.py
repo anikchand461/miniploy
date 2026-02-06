@@ -1,7 +1,6 @@
 """Setup command - Configure platform authentication and create projects."""
 import os
-import configparser
-from pathlib import Path
+import re
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -17,29 +16,27 @@ console = Console()
 SUPPORTED_PLATFORMS = ["vercel", "netlify", "render", "railway", "flyio"]
 
 
-def _get_git_remote(project_path: Path) -> str:
-    git_config = project_path / ".git" / "config"
-    if not git_config.exists():
-        return ""
-    config = configparser.ConfigParser()
-    config.read(git_config)
-    for section in config.sections():
-        if section.lower().startswith("remote ") and config.has_option(section, "url"):
-            return config.get(section, "url")
-    return ""
+def _extract_repo_info(repo_url: str):
+    """Extract owner, repo name, and normalize URL from GitHub URL."""
+    url = repo_url.strip()
+    if url.endswith('.git'):
+        url = url[:-4]
 
+    if url.startswith("git@github.com:"):
+        parts = url.replace("git@github.com:", "").split("/")
+        if len(parts) == 2:
+            owner, repo = parts[0], parts[1]
+            return owner, repo, f"https://github.com/{owner}/{repo}.git"
+    elif url.startswith("https://github.com/"):
+        path = url[len("https://github.com/"):]
+        # Handle possible trailing spaces in user input
+        path = path.strip().rstrip('/')
+        parts = path.split("/")
+        if len(parts) == 2:
+            owner, repo = parts[0], parts[1]
+            return owner, repo, f"https://github.com/{owner}/{repo}.git"
 
-def _get_git_branch(project_path: Path) -> str:
-    head_file = project_path / ".git" / "HEAD"
-    if not head_file.exists():
-        return ""
-    try:
-        head = head_file.read_text(encoding="utf-8").strip()
-        if head.startswith("ref:"):
-            return head.split("/", 2)[-1]
-    except Exception:
-        return ""
-    return ""
+    raise ValueError("Invalid GitHub URL. Use format: https://github.com/user/repo")
 
 
 def setup(
@@ -122,140 +119,131 @@ def setup(
             console.print("\n[bold red]❌ Token is required[/bold red]\n")
             raise typer.Exit(1)
     
+    # Initialize base handler config
+    handler_config = {'token': token}
+
+    # === RENDER-SPECIFIC FLOW: Full field collection ===
+    if platform == "render":
+        console.print("[bold cyan]🔗 Render deployment configuration[/bold cyan]")
+        
+        # 1. GitHub URL
+        repo_url = Prompt.ask("GitHub repository URL (public)")
+        try:
+            owner, repo_name, normalized_url = _extract_repo_info(repo_url)
+        except ValueError as e:
+            console.print(f"\n[bold red]❌ {e}[/bold red]\n")
+            raise typer.Exit(1)
+
+        # 2. Project name
+        safe_name = re.sub(r"[^a-z0-9\-]", "-", repo_name.lower())[:50]
+        if not safe_name or not safe_name[0].isalpha():
+            safe_name = "app-" + safe_name[-46:]
+        project_name = Prompt.ask("Project name", default=safe_name)
+
+        # 3. Language/Runtime
+        language = Prompt.ask(
+            "Language/Runtime",
+            choices=["static", "node", "python", "go", "ruby", "docker"],
+            default="static"
+        )
+
+        # 4. Branch
+        branch = Prompt.ask("Branch", default="main")
+
+        # 5. Root directory
+        root_dir = Prompt.ask("Root directory (relative to repo root)", default="")
+
+        # 6. Build command
+        build_cmd = Prompt.ask("Build command (leave empty if none)", default="")
+
+        # 7. Start command (for web services)
+        start_cmd = ""
+        if language != "static":
+            start_cmd = Prompt.ask("Start command (e.g., 'npm start', 'gunicorn app:app')", default="")
+
+        # 8. Instance type
+        instance_type = "free"  # Render free tier
+        if language != "static":
+            instance_type = Prompt.ask(
+                "Instance type",
+                choices=["free", "starter", "standard", "pro"],
+                default="free"
+            )
+
+        # 9. Environment variables
+        env_vars = {}
+        if Confirm.ask("Add environment variables?", default=False):
+            while True:
+                key = Prompt.ask("Env var name (or press Enter to finish)", default="")
+                if not key:
+                    break
+                value = Prompt.ask(f"Value for {key}", password=True)
+                env_vars[key] = value
+
+        # Build config
+        handler_config.update({
+            'name': project_name,
+            'repo': normalized_url,
+            'branch': branch,
+            'language': language,
+            'root_directory': root_dir,
+            'build_command': build_cmd,
+            'start_command': start_cmd,
+            'instance_type': instance_type,
+            'env_vars': env_vars
+        })
+
+    else:
+        # Other platforms: simplified flow
+        default_name = config.get('name') or os.path.basename(os.getcwd())
+        project_name = Prompt.ask("Project name", default=default_name)
+        handler_config['name'] = project_name
+
     # Initialize platform handler
     handler_class = get_platform_handler(platform)
     if not handler_class:
         console.print(f"\n[bold red]❌ Platform handler not implemented:[/bold red] {platform}\n")
         raise typer.Exit(1)
-    
-    project_path = Path(project).resolve()
 
-    handler_config = {
-        'token': token,
-        'name': config.get('name', os.path.basename(os.getcwd())),
-        'framework': config.get('framework'),
-        'build_command': config.get('build_command'),
-        'start_command': config.get('start_command'),
-        'runtime': config.get('runtime'),
-        'dockerfile': config.get('dockerfile'),
-        'project_path': str(project_path),
-        'repo_url': config.get('repo_url'),
-        'branch': config.get('branch')
-    }
-
-    # Infer docker runtime if Dockerfile exists
-    if not handler_config.get('runtime'):
-        dockerfile = project_path / (handler_config.get('dockerfile') or 'Dockerfile')
-        if dockerfile.exists():
-            handler_config['runtime'] = 'docker'
-            config['runtime'] = 'docker'
-            config['dockerfile'] = dockerfile.name
-
-    # Docker-specific hints
-    if handler_config.get('runtime') == 'docker':
-        if platform in {'vercel', 'netlify'}:
-            console.print("\n[bold yellow]⚠️  Docker deployments are not supported on Vercel/Netlify in miniploy[/bold yellow]\n")
-        if platform == 'render':
-            repo_url = handler_config.get('repo_url') or _get_git_remote(project_path)
-            if not repo_url:
-                repo_url = Prompt.ask("Git repository URL for Render (required for Docker deploy)")
-            branch = handler_config.get('branch') or _get_git_branch(project_path) or "main"
-            dockerfile_path = handler_config.get('dockerfile') or "Dockerfile"
-            handler_config['repo_url'] = repo_url
-            handler_config['branch'] = branch
-            handler_config['dockerfile'] = dockerfile_path
-            config['repo_url'] = repo_url
-            config['branch'] = branch
-            config['dockerfile'] = dockerfile_path
-    elif platform == 'render':
-        repo_url = handler_config.get('repo_url') or _get_git_remote(project_path)
-        if not repo_url:
-            repo_url = Prompt.ask("Git repository URL for Render (required for deploy)")
-        handler_config['repo_url'] = repo_url
-        handler_config['branch'] = handler_config.get('branch') or _get_git_branch(project_path) or "main"
-        config['repo_url'] = handler_config['repo_url']
-        config['branch'] = handler_config['branch']
-    
     handler = handler_class(handler_config)
     
     # Authenticate
     console.print("[bold cyan]🔐 Authenticating...[/bold cyan]")
-    
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
+    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}")) as progress:
         task = progress.add_task("[cyan]Verifying credentials...", total=None)
-        
         if not handler.authenticate():
             console.print("\n[bold red]❌ Authentication failed[/bold red]")
             console.print("[yellow]Please check your API token and try again[/yellow]\n")
             raise typer.Exit(1)
-        
         progress.update(task, completed=True)
     
     console.print("[bold green]✅ Authentication successful![/bold green]\n")
     
     # Create project
-    create_project = Confirm.ask(
+    create_project = True if platform == "render" else Confirm.ask(
         f"Create a new project on {platform.capitalize()}?",
         default=True
     )
-    
+
     if create_project:
-        project_name = Prompt.ask(
-            "Project name",
-            default=handler_config['name']
-        )
-        
-        handler_config['name'] = project_name
-        handler.config['name'] = project_name
-        
+        project_name = handler_config['name']
         console.print(f"\n[bold cyan]📦 Creating project '{project_name}'...[/bold cyan]")
         
         try:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-            ) as progress:
+            with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}")) as progress:
                 task = progress.add_task("[cyan]Creating project...", total=None)
                 project_id = handler.create_project()
                 progress.update(task, completed=True)
             
             console.print(f"[bold green]✅ Project created:[/bold green] {project_id}\n")
             
-            # Update config
-            config['platform'] = platform
-            config['project_id'] = project_id
-            config['project_name'] = project_name
-            config['project_path'] = handler_config.get('project_path')
-            if handler_config.get('runtime'):
-                config['runtime'] = handler_config.get('runtime')
-            if handler_config.get('dockerfile'):
-                config['dockerfile'] = handler_config.get('dockerfile')
-            if handler_config.get('repo_url'):
-                config['repo_url'] = handler_config.get('repo_url')
-            if handler_config.get('branch'):
-                config['branch'] = handler_config.get('branch')
-            
-            # Set environment variables if needed
-            env_vars_needed = config.get('env_vars', {})
-            if env_vars_needed and Confirm.ask("Set environment variables now?", default=False):
-                console.print("\n[bold cyan]🔐 Setting environment variables...[/bold cyan]")
-                
-                env_vars = {}
-                for var_name in env_vars_needed:
-                    value = Prompt.ask(f"  {var_name}", password=True)
-                    if value:
-                        env_vars[var_name] = value
-                
-                if env_vars:
-                    handler.set_env_vars(project_id, env_vars)
-                    console.print("[bold green]✅ Environment variables set[/bold green]\n")
-            
             # Save config
+            config.update({
+                'platform': platform,
+                'project_id': project_id,
+                'project_name': project_name,
+                **{k: v for k, v in handler_config.items() if k not in ['token']}
+            })
             config_path = save_config(config)
             console.print(f"[bold green]✅ Configuration saved to {config_path}[/bold green]\n")
             
