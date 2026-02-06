@@ -39,29 +39,61 @@ class RenderHandler(PlatformHandler):
         if not self.owner_id:
             raise Exception("Owner ID not found. Please authenticate first.")
         
-        service_type = self.config.get('service_type', 'web_service')
         name = self.config.get('name', 'my-service')
         runtime = self.config.get('runtime', 'python')
-        
-        # Map runtime to Render's expected format
-        runtime_map = {
-            'python': 'python',
-            'node': 'node',
-            'nodejs': 'node',
-            'static': 'static',
-            'docker': 'docker',
-            'go': 'go',
-            'ruby': 'ruby'
-        }
-        env = runtime_map.get(runtime, 'docker')
-        
-        # Create minimal static site first - easiest to set up
-        payload = {
-            'type': 'static_site',
-            'name': name,
-            'ownerId': self.owner_id,
-            'autoDeploy': False
-        }
+        repo_url = self.config.get('repo_url')
+        branch = self.config.get('branch', 'main')
+        dockerfile_path = self.config.get('dockerfile', 'Dockerfile')
+        build_command = self.config.get('build_command')
+        start_command = self.config.get('start_command')
+        publish_dir = self.config.get('publish_dir', '.')
+
+        if runtime == 'docker':
+            if not repo_url:
+                raise Exception("Render Docker deploy requires a Git repository URL.")
+            payload = {
+                'type': 'web_service',
+                'name': name,
+                'ownerId': self.owner_id,
+                'repo': repo_url,
+                'branch': branch,
+                'autoDeploy': True,
+                'env': 'docker'
+            }
+        elif runtime == 'static':
+            payload = {
+                'type': 'static_site',
+                'name': name,
+                'ownerId': self.owner_id,
+                'autoDeploy': False,
+                'buildCommand': build_command or '',
+                'publishPath': publish_dir
+            }
+            if repo_url:
+                payload['repo'] = repo_url
+                payload['branch'] = branch
+        else:
+            runtime_map = {
+                'python': 'python',
+                'node': 'node',
+                'nodejs': 'node',
+                'go': 'go',
+                'ruby': 'ruby',
+                'php': 'php'
+            }
+            env = runtime_map.get(runtime, 'docker')
+            payload = {
+                'type': 'web_service',
+                'name': name,
+                'ownerId': self.owner_id,
+                'autoDeploy': True,
+                'env': env,
+                'buildCommand': build_command or '',
+                'startCommand': start_command or ''
+            }
+            if repo_url:
+                payload['repo'] = repo_url
+                payload['branch'] = branch
         
         url = f"{self.BASE_URL}/services"
         

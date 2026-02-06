@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>MiniDeploy - Flask App</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+    <div class="container">
+        <h1>🚀 MiniDeploy</h1>
+        <p>Your Flask app is successfully deployed!</p>
+
+        <button onclick="showMessage()">Click Me</button>
+
+        <div id="message" class="hidden">
+            🎉 Deployment Successful!
+        </div>
+    </div>
+
+    <script>
+        function showMessage() {
+            document.getElementById("message").classList.remove("hidden");
+        }
+    </script>
+
+</body>
+</html>

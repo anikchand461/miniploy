@@ -1,5 +1,7 @@
 """Run command - Trigger deployment and monitor status."""
 import typer
+import subprocess
+from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
@@ -36,6 +38,8 @@ def run(
     # Validate config
     platform = get_platform(config)
     project_id = get_project_id(config)
+    runtime = config.get('runtime')
+    project_path = Path(config.get('project_path', '.')).resolve()
     
     if not platform:
         console.print("\n[bold red]❌ No platform configured[/bold red]")
@@ -45,6 +49,10 @@ def run(
     if not project_id:
         console.print("\n[bold red]❌ No project ID found[/bold red]")
         console.print("\n[yellow]Run 'miniploy setup <platform>' to create a project[/yellow]\n")
+        raise typer.Exit(1)
+
+    if runtime == 'docker' and platform in {'vercel', 'netlify'}:
+        console.print("\n[bold red]❌ Docker deployments are not supported on Vercel or Netlify[/bold red]\n")
         raise typer.Exit(1)
     
     # Display what will be deployed
@@ -104,6 +112,21 @@ def run(
     console.print("\n[bold cyan]🔨 Triggering deployment...[/bold cyan]\n")
     
     try:
+        if runtime == 'docker' and platform in {'flyio', 'railway'}:
+            command = ["flyctl", "deploy", "-a", project_id] if platform == 'flyio' else ["railway", "up"]
+            try:
+                console.print(f"[bold cyan]▶ Running:[/bold cyan] {' '.join(command)}")
+                subprocess.run(command, cwd=project_path, check=True)
+                console.print("[bold green]✅ Docker deployment command completed[/bold green]\n")
+                return
+            except FileNotFoundError:
+                console.print(f"\n[bold red]❌ Required CLI not found:[/bold red] {command[0]}\n")
+                console.print("[yellow]Install the CLI and try again.[/yellow]\n")
+                raise typer.Exit(1)
+            except subprocess.CalledProcessError as e:
+                console.print(f"\n[bold red]❌ Docker deployment failed:[/bold red] {e}\n")
+                raise typer.Exit(1)
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),

@@ -70,6 +70,7 @@ def deploy(
     config_table.add_column("Setting", style="cyan")
     config_table.add_column("Value", style="green")
     
+    config_table.add_row("Runtime", result.get('runtime', 'unknown'))
     config_table.add_row("Build Command", result.get('build_command', '(none)'))
     config_table.add_row("Start Command", result.get('start_command', '(none)'))
     config_table.add_row("Install Command", result.get('install_command', '(auto-detected)'))
@@ -129,6 +130,8 @@ def deploy(
             'start_command': result.get('start_command', ''),
             'install_command': result.get('install_command', ''),
             'publish_dir': result.get('publish_dir', '.'),
+            'dockerfile': result.get('dockerfile'),
+            'project_path': str(Path(path).resolve()),
             'env_vars': {},
             'ai_analysis': {
                 'confidence': confidence,

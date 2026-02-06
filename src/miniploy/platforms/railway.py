@@ -103,9 +103,6 @@ class RailwayHandler(PlatformHandler):
     
     def create_project(self) -> str:
         """Create a new project on Railway."""
-        if not self.workspace_id:
-            raise Exception("Workspace ID not found. Please authenticate first or join a team.")
-        
         project_name = self.config.get('name', 'my-project')
         
         query = """
@@ -117,11 +114,12 @@ class RailwayHandler(PlatformHandler):
         }
         """
         
+        input_payload = {'name': project_name}
+        if self.workspace_id:
+          input_payload['workspaceId'] = self.workspace_id
+
         variables = {
-            'input': {
-                'name': project_name,
-                'teamId': self.workspace_id
-            }
+          'input': input_payload
         }
         
         try:

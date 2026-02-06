@@ -32,11 +32,16 @@ class NetlifyHandler(PlatformHandler):
     
     def create_project(self) -> str:
         """Create a new site on Netlify."""
+        import random
+        import string
+
         site_name = self.config.get('name', 'my-site')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        unique_site_name = f"{site_name}-{random_suffix}"
         
         # Create a minimal site without repo - can be linked later
         payload = {
-            'name': site_name
+            'name': unique_site_name
         }
         
         url = f"{self.BASE_URL}/sites"

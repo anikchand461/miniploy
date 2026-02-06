@@ -20,6 +20,7 @@ class FlyioHandler(PlatformHandler):
         }
         self.user_info = None
         self.org_slug = None
+        self.org_id = None
     
     def _graphql_request(self, query: str, variables: dict = None) -> Dict:
         """Execute a GraphQL request."""
@@ -62,7 +63,8 @@ class FlyioHandler(PlatformHandler):
                 # Get first organization
                 orgs = result['data']['viewer'].get('organizations', {}).get('nodes', [])
                 if orgs and len(orgs) > 0:
-                    self.org_slug = orgs[0].get('slug') or orgs[0].get('id')
+                  self.org_slug = orgs[0].get('slug')
+                  self.org_id = orgs[0].get('id')
                 
                 return True
             return False
@@ -71,8 +73,8 @@ class FlyioHandler(PlatformHandler):
     
     def create_project(self) -> str:
         """Create a new app on Fly.io."""
-        if not self.org_slug:
-            raise Exception("Organization not found. Please authenticate first or create an organization.")
+        if not self.org_id:
+          raise Exception("Organization not found. Please authenticate first or create an organization.")
         
         app_name = self.config.get('name', 'my-app')
         
@@ -90,7 +92,7 @@ class FlyioHandler(PlatformHandler):
         variables = {
             'input': {
                 'name': app_name,
-                'organizationSlug': self.org_slug
+                'organizationId': self.org_id
             }
         }
         

@@ -10,7 +10,7 @@ SYSTEM_PROMPT = """You are an expert DevOps engineer analyzing projects for depl
 Analyze the provided project files and return ONLY a valid JSON object with this exact structure:
 {
   "framework": "nextjs|react|vue|angular|flask|fastapi|django|express|static|unknown",
-  "runtime": "node|python|go|ruby|php|static",
+    "runtime": "node|python|go|ruby|php|static|docker",
   "build_command": "npm run build",
   "start_command": "npm start",
   "install_command": "npm install",
@@ -146,6 +146,14 @@ def analyze_project(path: str) -> Dict:
             content = '\n'.join(lines[1:-1] if len(lines) > 2 else lines)
         
         result = json.loads(content)
+
+        # If Dockerfile exists, prefer docker runtime
+        if any(Path(p).name == "Dockerfile" for p in found_files.keys()):
+            result["runtime"] = "docker"
+            result["dockerfile"] = "Dockerfile"
+            summary = result.get("summary", "")
+            if "Dockerfile" not in summary:
+                result["summary"] = (summary + " Dockerfile detected.").strip()
         
         # Validate required fields
         required_fields = ['framework', 'summary', 'confidence']
