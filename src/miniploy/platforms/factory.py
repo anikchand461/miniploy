@@ -1,3 +1,9 @@
+from .vercel import VercelHandler
+from .netlify import NetlifyHandler
+from .render import RenderHandler
+from .railway import RailwayHandler
+from .flyio import FlyioHandler
+
 class PlatformHandler:
     def setup(self, config):
         raise NotImplementedError
@@ -6,12 +12,13 @@ class PlatformHandler:
         raise NotImplementedError
 
 
-def get_platform_handler(platform_name: str) -> PlatformHandler:
-    # Placeholder - real version imports real classes
-    name = platform_name.lower()
-    if name == "vercel":
-        return PlatformHandler()  # ← replace with VercelHandler()
-    elif name == "render":
-        return PlatformHandler()
-    # etc.
-    raise ValueError(f"Unknown platform: {platform_name}")
+def get_platform_handler(platform_name: str):
+    """Return the appropriate platform handler based on the platform name."""
+    handlers = {
+        'vercel': VercelHandler,
+        'netlify': NetlifyHandler,
+        'render': RenderHandler,
+        'railway': RailwayHandler,
+        'flyio': FlyioHandler,
+    }
+    return handlers.get(platform_name.lower())
